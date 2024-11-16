@@ -1,51 +1,31 @@
-import express, { Request, Response } from "express";
-import cors from "cors";
-import "dotenv/config";
-import { createServer } from "http";
-import { Server } from "socket.io";
+import { runHyperbolic } from "./hyperbolic";
+import { sendPush, getPushHistory } from "./push";
+import * as cron from "node-cron";
+import dotenv from "dotenv";
 
-import router from "./routes";
-import socketConnection from "./sockets";
-import { errorHandler } from "./middlewares/error.middleware";
+dotenv.config();
 
-const app = express();
-const port = process.env.PORT;
+const main = async () => {
+  try {
+    const history = await getPushHistory();
+    const message = history.map(h => `address ${h.address}, content ${h.content}, timestamp ${h.timestamp}`).join("\n");
+   
+    const messageAI = await runHyperbolic(message);
+    console.log('Message AI:', messageAI);
+    if (messageAI) {
+      const result = await sendPush(messageAI);
+      console.log(result, 'push success !!!');
+    }
+  } catch (error) {
+    console.error('Error in main function:', error);
+  }
+};
 
-app.use(express.json());
-app.use(cors());
-
-app.use("/", router);
-
-app.get("/", (req: Request, res: Response) => {
-  res.send("Server is running :)");
+// Run every 10 minutes
+cron.schedule(process.env.CRON_TIME || "*/10 * * * *", () => {
+  console.log('Running scheduled task...');
+  main();
 });
 
-app.use(errorHandler);
-
-const httpServer = createServer(app);
-const io = new Server(httpServer, {
-  cors: {
-    origin: "*",
-  },
-  transports: ["websocket"],
-}).of("/room");
-io.on("connection", (socket) => {
-  console.log("a user connected");
-  socketConnection(socket);
-  socket.on("disconnect", () => {
-    console.log("user disconnected");
-  });
-});
-
-io.use((socket, next) => {
-  const auth = socket.handshake.headers.authorization;
-  // check auth
-  next();
-});
-
-httpServer.listen(port, () => {
-  console.log(`[server]: Server is running on ${port}`);
-});
-
-// For integration testing
-export default app;
+// Initial run
+main();
